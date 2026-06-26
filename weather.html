@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cuaca & Lokasi Saya</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --ink: #0d1b2a;
+    --ink-mid: #3a5068;
+    --ink-light: #7a95aa;
+    --sky: #d6eaf8;
+    --card: rgba(255,255,255,0.82);
+    --card-border: rgba(255,255,255,0.9);
+    --accent: #f4a03a;
+    --blue: #378ADD;
+  }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: linear-gradient(160deg, #d6eaf8 0%, #bdd6ee 40%, #a8c8e8 100%);
+    min-height: 100vh;
+    color: var(--ink);
+  }
+
+  .clouds { position: fixed; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:0; overflow:hidden; }
+  .cloud { position:absolute; background:rgba(255,255,255,0.3); border-radius:50px; animation:drift linear infinite; }
+  .cloud::before,.cloud::after { content:''; position:absolute; background:inherit; border-radius:50%; }
+  .cloud:nth-child(1){width:180px;height:40px;top:8%;animation-duration:45s;}
+  .cloud:nth-child(1)::before{width:80px;height:60px;top:-30px;left:25px;}
+  .cloud:nth-child(1)::after{width:60px;height:50px;top:-20px;left:80px;}
+  .cloud:nth-child(2){width:120px;height:30px;top:22%;animation-duration:60s;animation-delay:-20s;opacity:0.5;}
+  .cloud:nth-child(2)::before{width:55px;height:45px;top:-22px;left:20px;}
+  .cloud:nth-child(2)::after{width:45px;height:35px;top:-14px;left:55px;}
+  @keyframes drift{from{transform:translateX(-300px);}to{transform:translateX(110vw);}}
+
+  .layout { position:relative; z-index:1; display:flex; flex-direction:column; min-height:100vh; }
+
+  .topbar {
+    padding: 1.25rem 1.5rem 0.75rem;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .app-title { font-family:'DM Serif Display',serif; font-size:1.1rem; color:var(--ink-mid); }
+  .locate-btn {
+    display: flex; align-items: center; gap: 7px;
+    padding: 9px 18px;
+    background: var(--ink);
+    color: #fff;
+    border: none; border-radius: 100px;
+    font-family:'DM Sans',sans-serif;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.15s;
+  }
+  .locate-btn:hover { background: var(--ink-mid); transform: scale(1.04); }
+  .locate-btn svg { width:15px; height:15px; stroke:#fff; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+  .locate-btn.loading { opacity:0.6; pointer-events:none; }
+
+  /* MAP */
+  #map {
+    width: 100%;
+    height: 55vh;
+    min-height: 280px;
+  }
+
+  /* custom marker */
+  .my-marker {
+    width: 44px; height: 44px;
+    background: var(--ink);
+    border: 3px solid #fff;
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    box-shadow: 0 4px 14px rgba(13,27,42,0.35);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .my-marker-inner {
+    transform: rotate(45deg);
+    font-size: 18px;
+  }
+
+  /* WEATHER PANEL */
+  .panel {
+    flex: 1;
+    padding: 1.25rem 1.25rem 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .status-msg {
+    background: rgba(255,255,255,0.6);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    padding: 1rem 1.25rem;
+    font-size: 0.9rem;
+    color: var(--ink-mid);
+    text-align: center;
+  }
+  .status-msg.error { background: rgba(244,80,58,0.1); border-color: rgba(244,80,58,0.3); color:#c0392b; }
+
+  .spinner-wrap { display:flex; justify-content:center; padding:1rem; }
+  .spinner-ring { width:32px;height:32px;border:3px solid rgba(13,27,42,0.1);border-top-color:var(--ink-mid);border-radius:50%;animation:spin 0.8s linear infinite; }
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .weather-main {
+    background: var(--card);
+    backdrop-filter: blur(16px);
+    border: 1.5px solid var(--card-border);
+    border-radius: 24px;
+    padding: 1.5rem;
+    animation: fadeUp 0.4s ease;
+    display: none;
+  }
+  @keyframes fadeUp{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:translateY(0);}}
+
+  .loc-row { display:flex; align-items:center; gap:8px; margin-bottom:1rem; }
+  .loc-dot { width:8px;height:8px;background:#3aad7a;border-radius:50%;animation:pulse 2s ease-in-out infinite; }
+  @keyframes pulse{0%,100%{transform:scale(1);opacity:1;}50%{transform:scale(1.5);opacity:0.6;}}
+  .loc-name { font-size:1rem; font-weight:500; color:var(--ink); }
+  .loc-coord { font-size:0.75rem; color:var(--ink-light); margin-left:auto; }
+
+  .temp-desc-row { display:flex; align-items:flex-end; gap:12px; margin-bottom:1.25rem; }
+  .temp-big { font-family:'DM Serif Display',serif; font-size:4.5rem; line-height:1; color:var(--ink); }
+  .temp-right { display:flex; flex-direction:column; gap:4px; margin-bottom:10px; }
+  .wx-icon { font-size:2.2rem; }
+  .wx-desc { font-size:0.85rem; color:var(--ink-mid); text-transform:capitalize; }
+
+  .stats-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .stat-box { background:rgba(13,27,42,0.04); border-radius:12px; padding:10px 8px; text-align:center; }
+  .stat-val { font-size:1.05rem; font-weight:500; color:var(--ink); }
+  .stat-lbl { font-size:0.68rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-light); margin-top:2px; }
+
+  .chart-wrap {
+    background: var(--card);
+    backdrop-filter: blur(16px);
+    border: 1.5px solid var(--card-border);
+    border-radius: 24px;
+    padding: 1.25rem;
+    animation: fadeUp 0.5s ease;
+    display: none;
+  }
+  .chart-ttl { font-size:0.72rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--ink-light); margin-bottom:10px; }
+  .chart-legend { display:flex; gap:14px; font-size:0.72rem; color:var(--ink-mid); margin-bottom:10px; }
+  .ldot { width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:4px; }
+</style>
+</head>
+<body>
+<div class="clouds"><div class="cloud"></div><div class="cloud"></div></div>
+
+<div class="layout">
+  <div class="topbar">
+    <span class="app-title">Cuaca Saya</span>
+    <button class="locate-btn" id="locateBtn" onclick="getLocation()">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7" stroke-dasharray="2 2"/></svg>
+      Temukan Lokasi Saya
+    </button>
+  </div>
+
+  <div id="map"></div>
+
+  <div class="panel">
+    <div class="status-msg" id="statusMsg">Tekan <strong>Temukan Lokasi Saya</strong> untuk melihat cuaca di posisi kamu sekarang.</div>
+    <div class="spinner-wrap" id="spinnerWrap" style="display:none"><div class="spinner-ring"></div></div>
+
+    <div class="weather-main" id="weatherMain">
+      <div class="loc-row">
+        <div class="loc-dot"></div>
+        <span class="loc-name" id="locName">—</span>
+        <span class="loc-coord" id="locCoord">—</span>
+      </div>
+      <div class="temp-desc-row">
+        <div class="temp-big" id="tempBig">—</div>
+        <div class="temp-right">
+          <span class="wx-icon" id="wxIcon"></span>
+          <span class="wx-desc" id="wxDesc"></span>
+        </div>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-box"><div class="stat-val" id="sHum">—</div><div class="stat-lbl">Kelembapan</div></div>
+        <div class="stat-box"><div class="stat-val" id="sWind">—</div><div class="stat-lbl">Angin km/h</div></div>
+        <div class="stat-box"><div class="stat-val" id="sFeel">—</div><div class="stat-lbl">Terasa °C</div></div>
+      </div>
+    </div>
+
+    <div class="chart-wrap" id="chartWrap">
+      <div class="chart-ttl">Prakiraan 48 jam ke depan</div>
+      <div class="chart-legend">
+        <span><span class="ldot" style="background:#3a5068"></span>Suhu (°C)</span>
+        <span><span class="ldot" style="background:#f4a03a"></span>Kelembapan (%)</span>
+      </div>
+      <div style="position:relative;width:100%;height:180px;">
+        <canvas id="fxChart"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API_KEY = 'f9c4dc0f3515130f0e1828a6c63a0c07';
+let map, userMarker, chartInst;
+
+const ICONS = {Clear:'☀️',Clouds:'☁️',Rain:'🌧️',Drizzle:'🌦️',Thunderstorm:'⛈️',Snow:'❄️',Mist:'🌫️',Fog:'🌫️',Haze:'🌫️',Dust:'🌪️'};
+
+// init map centered on Indonesia
+map = L.map('map', { zoomControl: true }).setView([-2.5, 118], 5);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap',
+  maxZoom: 18
+}).addTo(map);
+
+function setStatus(msg, isError=false) {
+  const el = document.getElementById('statusMsg');
+  el.textContent = msg;
+  el.style.display = 'block';
+  el.className = 'status-msg' + (isError ? ' error' : '');
+}
+
+function setLoading(v) {
+  document.getElementById('spinnerWrap').style.display = v ? 'flex' : 'none';
+  document.getElementById('locateBtn').classList.toggle('loading', v);
+  if (v) {
+    document.getElementById('statusMsg').style.display = 'none';
+    document.getElementById('weatherMain').style.display = 'none';
+    document.getElementById('chartWrap').style.display = 'none';
+  }
+}
+
+function getLocation() {
+  if (!navigator.geolocation) { setStatus('Browser kamu tidak mendukung GPS.', true); return; }
+  setLoading(true);
+  navigator.geolocation.getCurrentPosition(onPosition, onGeoError, { timeout: 12000 });
+}
+
+function onGeoError(err) {
+  setLoading(false);
+  const msgs = { 1:'Akses lokasi ditolak. Izinkan lokasi di browser kamu.', 2:'Posisi tidak bisa ditentukan.', 3:'Permintaan lokasi timeout.' };
+  setStatus(msgs[err.code] || 'Gagal mendapat lokasi.', true);
+}
+
+async function onPosition(pos) {
+  const lat = pos.coords.latitude;
+  const lon = pos.coords.longitude;
+
+  // pan map
+  map.setView([lat, lon], 11, { animate: true });
+
+  // place marker
+  if (userMarker) map.removeLayer(userMarker);
+  const icon = L.divIcon({
+    html: `<div style="width:44px;height:44px;background:#0d1b2a;border:3px solid #fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 4px 14px rgba(13,27,42,0.4);display:flex;align-items:center;justify-content:center;">
+             <span style="transform:rotate(45deg);font-size:18px;">📍</span>
+           </div>`,
+    iconSize: [44, 44],
+    iconAnchor: [12, 44],
+    className: ''
+  });
+  userMarker = L.marker([lat, lon], { icon }).addTo(map);
+
+  // fetch weather
+  try {
+    const [cRes, fRes] = await Promise.all([
+      fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=metric&lang=id`),
+      fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=metric&lang=id`)
+    ]);
+    if (!cRes.ok) { setLoading(false); setStatus('Gagal mengambil data cuaca.', true); return; }
+    const c = await cRes.json();
+    const f = await fRes.json();
+
+    document.getElementById('locName').textContent = c.name + (c.sys.country ? ', ' + c.sys.country : '');
+    document.getElementById('locCoord').textContent = lat.toFixed(4) + ', ' + lon.toFixed(4);
+    document.getElementById('tempBig').textContent = Math.round(c.main.temp) + '°';
+    document.getElementById('wxIcon').textContent = ICONS[c.weather[0].main] || '🌡️';
+    document.getElementById('wxDesc').textContent = c.weather[0].description;
+    document.getElementById('sHum').textContent = c.main.humidity + '%';
+    document.getElementById('sWind').textContent = Math.round(c.wind.speed * 3.6);
+    document.getElementById('sFeel').textContent = Math.round(c.main.feels_like);
+
+    userMarker.bindPopup(`<b>${c.name}</b><br>${Math.round(c.main.temp)}°C — ${c.weather[0].description}`).openPopup();
+
+    // chart
+    const list = f.list.slice(0, 16);
+    const labels = list.map(i => {
+      const d = new Date(i.dt * 1000);
+      return d.toLocaleDateString('id-ID',{weekday:'short'}) + ' ' + d.getHours().toString().padStart(2,'0') + ':00';
+    });
+    if (chartInst) chartInst.destroy();
+    chartInst = new Chart(document.getElementById('fxChart'), {
+      data: {
+        labels,
+        datasets: [
+          { type:'line', data: list.map(i=>Math.round(i.main.temp)), borderColor:'#3a5068', backgroundColor:'rgba(58,80,104,0.1)', borderWidth:2, pointRadius:3, fill:true, yAxisID:'y' },
+          { type:'bar', data: list.map(i=>i.main.humidity), backgroundColor:'rgba(244,160,58,0.3)', borderColor:'#f4a03a', borderWidth:1, yAxisID:'y2' }
+        ]
+      },
+      options: {
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{ display:false } },
+        scales: {
+          x:{ ticks:{ autoSkip:true, maxRotation:45, font:{size:10}, color:'#7a95aa' }, grid:{ color:'rgba(0,0,0,0.04)' } },
+          y:{ position:'left', ticks:{ font:{size:10}, color:'#3a5068', callback:v=>v+'°' }, grid:{ color:'rgba(0,0,0,0.04)' } },
+          y2:{ position:'right', ticks:{ font:{size:10}, color:'#f4a03a', callback:v=>v+'%' }, grid:{ display:false } }
+        }
+      }
+    });
+
+    setLoading(false);
+    document.getElementById('weatherMain').style.display = 'block';
+    document.getElementById('chartWrap').style.display = 'block';
+
+  } catch(e) {
+    setLoading(false);
+    setStatus('Koneksi gagal. Pastikan terhubung ke internet.', true);
+  }
+}
+</script>
+</body>
+</html>
